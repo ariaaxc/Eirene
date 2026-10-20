@@ -1,0 +1,25 @@
+version: '3.8'
+services:
+  db:
+    image: mysql:8.0
+    container_name: eirene_db
+    restart: always
+    environment:
+      MYSQL_DATABASE: eirene
+      MYSQL_ROOT_PASSWORD: root_password
+      MYSQL_USER: eirene_user
+      MYSQL_USER_PASSWORD: eirene_password
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data: /var/lib/mysql
+  backend:
+    build: ./backend
+    container_name: eirene_backend
+    restart: always
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+volumes:
+  mysql_data:

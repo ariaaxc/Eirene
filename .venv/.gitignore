@@ -1,0 +1,49 @@
+# === Python (Backend) ===
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+.venv
+venv/
+ENV/
+env/
+.python-version
+poetry.lock
+
+# === Alembic (Миграции) ===
+# Логи и временные файлы alembic
+alembic.log
+
+# === Node.js & React (Frontend) ===
+node_modules/
+/frontend/dist
+/frontend/build
+.eslintcache
+.stylelintcache
+*.local
+
+# === Локальные переменные окружения и секреты ===
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# === Docker & СУБД ===
+# Игнорируем локальную директорию монтирования MySQL, чтобы не запушить БД в гит
+mysql_data/
+.docker/
+
+# === Мониторинг (Prometheus & Grafana) ===
+monitoring/data/
+
+# === Разное / Логи систем ===
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
