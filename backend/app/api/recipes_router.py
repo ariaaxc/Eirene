@@ -1,62 +1,57 @@
-from fastapi import APIRouter, Query
-from typing import List
+from fastapi import APIRouter
+from sqlalchemy import select, func, and_, text
+from sqlalchemy.orm import selectinload
+
+from app.core.database import session_factory
+from app.models import Recipe, RecipeIngredient, UserFridge, Product
+from app.schemas import RecipeOut, WhatToCookOut
 
 router = APIRouter(prefix="/recipes", tags=["Каталог рецептов"])
 
-# 1. каталог рецептов, с точным списком нужных ингредиентов!
-FAKE_RECIPES_DATABASE = [
-    {
-        "id": 1,
-        "name": "Борщ",
-        "ingredients": ["свекла", "капуста", "мясо", "картошка", "лук"]
-    },
-    {
-        "id": 2,
-        "name": "Яичница с луком",
-        "ingredients": ["яйцо", "лук", "масло"]
-    },
-    {
-        "id": 3,
-        "name": "Курица с рисом",
-        "ingredients": ["курица", "рис", "лук"]
-    }
-]
+
+# 1. Каталог рецептов с пагинацией
+@router.get("", response_model=list[RecipeOut])
+async def get_recipes_catalog(page: int = 1, limit: int = 10):
+    async with session_factory() as session:
+        query = select(Recipe).options(selectinload(Recipe.ingredients)).offset((page - 1) * limit).limit(limit)
+        result = await session.execute(query)
+        return result.scalars().all()
 
 
-#  эндпоинт с пагинацией
-@router.get("")
-async def get_recipes_catalog(page: int = 1, limit: int = 2):
-    start_index = (page - 1) * limit
-    end_index = start_index + limit
-    return {"recipes": FAKE_RECIPES_DATABASE[start_index:end_index]}
+# 2. Что приготовить: приоритет по продуктам с истекающим сроком годности
+@router.get("/what-to-cook", response_model=list[WhatToCookOut])
+async def get_what_to_cook(user_id: int, only_ready: bool = False):
+    async with session_factory() as session:
+        total_cnt = func.count(RecipeIngredient.product_id)
+        avail_cnt = func.count(UserFridge.id)
 
+        # Считаем дату просрочки (дата добавления + срок годности) и берем самую ближайшую
+        exp_date = func.date_add(UserFridge.added_date, text("INTERVAL products.shelf_life_days DAY"))
+        earliest_exp = func.min(exp_date)
 
-# 2. ЭНДПОИНТ: Проверка продуктов из холодильника (GET /api/recipes/check-fridge)
-@router.get("/check-fridge")
-async def check_fridge_ingredients(fridge: List[str] = Query(default=[])):
+        # Условие, что продукт есть в холодильнике в нужном количестве
+        has_product = and_(
+            UserFridge.product_id == RecipeIngredient.product_id,
+            UserFridge.user_id == user_id,
+            UserFridge.quantity >= RecipeIngredient.quantity,
+        )
 
-    fridge_products = [p.lower() for p in fridge]
+        query = (
+            select(
+                Recipe.id, Recipe.name, Recipe.instructions, Recipe.calories,
+                total_cnt.label("total_ingredients"),
+                avail_cnt.label("available_ingredients"),
+                earliest_exp.label("earliest_expiration"),
+            )
+            .join(RecipeIngredient, Recipe.id == RecipeIngredient.recipe_id)
+            .join(Product, Product.id == RecipeIngredient.product_id)
+            .outerjoin(UserFridge, has_product)
+            .group_by(Recipe.id)
+            .order_by(avail_cnt.desc(), earliest_exp.is_(None), earliest_exp.asc())
+        )
 
-    results = []
+        if only_ready:
+            query = query.having(and_(total_cnt == avail_cnt))
 
-
-    for recipe in FAKE_RECIPES_DATABASE:
-        recipe_ingredients = recipe["ingredients"]
-
-
-        available = [item for item in recipe_ingredients if item in fridge_products]
-
-        missing = [item for item in recipe_ingredients if item not in fridge_products]
-
-        results.append({
-            "recipe_name": recipe["name"],
-            "all_needed_ingredients": recipe_ingredients,
-            "what_you_have": available,
-            "what_is_missing": missing,
-            "can_cook": len(missing) == 0
-        })
-
-    return {
-        "your_fridge": fridge_products,
-        "matching_results": results
-    }
+        result = await session.execute(query)
+        return result.all()
